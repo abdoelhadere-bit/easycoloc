@@ -12,6 +12,11 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         //
+        $middleware->alias([
+        'banned' => \App\Http\Middleware\EnsureNotBanned::class,
+        'admin'  => \App\Http\Middleware\EnsureAdminGlobal::class,
+        'owner'  => \App\Http\Middleware\EnsureColocationOwner::class,
+    ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
