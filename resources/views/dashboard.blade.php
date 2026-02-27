@@ -5,6 +5,12 @@
 
     <div class="py-10 max-w-5xl mx-auto space-y-6">
 
+    @if($errors->any())
+    <div class="bg-red-600 text-white px-4 py-2 rounded mb-4">
+        {{ $errors->first() }}
+    </div>
+@endif
+
         @if($errors->has('banned'))
             <div class="p-3 bg-red-100 border border-red-300 text-red-800 rounded">
                 {{ $errors->first('banned') }}
