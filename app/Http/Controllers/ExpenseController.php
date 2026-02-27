@@ -26,7 +26,7 @@ class ExpenseController extends Controller
             'date' => $request->date,
             'colocation_id' => $colocation->id,
             'user_id' => auth()->id(),
-            'category_id' => $request->category_id ?? null,
+            'category_id' => $request->category_id,
         ]);
 
         return back()->with('success', 'Dépense ajoutée.');

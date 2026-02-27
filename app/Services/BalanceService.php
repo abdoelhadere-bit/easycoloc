@@ -39,30 +39,30 @@ class BalanceService
                 'balance' => round($paid - $share, 2),
             ];
         }
-
         // Appliquer paiements
         foreach ($payments as $payment) {
-            foreach ($balances as &$b) {
+            foreach ($balances as $key => $b) {
                 if ($b['id'] == $payment->from_user_id) {
-                    $b['balance'] += $payment->amount;
+                    $balances[$key]['balance'] += $payment->amount;
                 }
                 if ($b['id'] == $payment->to_user_id) {
-                    $b['balance'] -= $payment->amount;
+                    $balances[$key]['balance'] -= $payment->amount;
                 }
             }
         }
-
+        
         // Séparer
         $creditors = [];
         $debtors = [];
 
         foreach ($balances as $b) {
+            // dd($balances);
             if ($b['balance'] > 0) $creditors[] = $b;
             if ($b['balance'] < 0) $debtors[] = $b;
-        }
-
-        //  Générer transactions
-        $transactions = [];
+            }
+            
+            //  Générer transactions
+            $transactions = [];
 
         foreach ($debtors as &$debtor) {
             foreach ($creditors as &$creditor) {
@@ -78,13 +78,13 @@ class BalanceService
                     'from' => $debtor['name'],
                     'to' => $creditor['name'],
                     'amount' => round($amount, 2),
-                ];
-
-                $debtor['balance'] += $amount;
-                $creditor['balance'] -= $amount;
-            }
-        }
-
+                    ];
+                    
+                    $debtor['balance'] += $amount;
+                    $creditor['balance'] -= $amount;
+                    }
+                    }
+                    
         return [
             'balances' => $balances,
             'transactions' => $transactions
