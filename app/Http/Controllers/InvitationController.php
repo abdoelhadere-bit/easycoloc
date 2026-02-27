@@ -10,7 +10,8 @@ class InvitationController extends Controller
 {
     public function store(Colocation $colocation)
     {
-        // TODO: vérifier owner (plus tard policy)
+        $this->authorize('invite', $colocation);
+        
         $token = Str::uuid()->toString();
 
         $invitation = Invitation::create([
