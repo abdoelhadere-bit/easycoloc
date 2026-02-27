@@ -8,6 +8,12 @@
             </div>
         @endif
 
+        @error('email')
+            <div class="text-red-500 text-sm mt-1">
+                {{ $message }}
+            </div>
+        @enderror
+
         {{-- HEADER --}}
         <div>
             <h1 class="text-3xl font-bold">
@@ -277,17 +283,6 @@
                     Inviter
                 </button>
             </form>
-
-            @if(session('invite_link'))
-                <div class="mt-3">
-                    <strong>Lien d’invitation :</strong><br>
-                    <a href="{{ session('invite_link') }}"
-                       class="text-blue-400 underline"
-                       target="_blank">
-                        {{ session('invite_link') }}
-                    </a>
-                </div>
-            @endif
         </div>
         @endif
         
