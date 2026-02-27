@@ -126,19 +126,25 @@ class ColocationController extends Controller
     }
 
 
-    public function cancel(Colocation $colocation)
+    public function cancel(Colocation $colocation, ReputationService $reputationService) 
     {
         $this->authorize('delete', $colocation);
+
+        $reputationService->handleCancel($colocation);
+
         $colocation->update(['status' => 'cancelled']);
-        return redirect()->route('dashboard')->with('success', 'Colocation annulée.');
+
+        return redirect()->route('dashboard')
+            ->with('success', 'Colocation annulée.');
     }
 
     
-    public function leave(Colocation $colocation)
+    public function leave(Colocation $colocation, ReputationService $reputationService) 
     {
-        // owner ne peut pas quitter
+        $user = auth()->user();
+
         $pivot = $colocation->members()
-            ->where('users.id', auth()->id())
+            ->where('users.id', $user->id)
             ->firstOrFail()
             ->pivot;
 
@@ -146,25 +152,29 @@ class ColocationController extends Controller
             return back()->withErrors(['leave' => 'Le owner ne peut pas quitter la colocation.']);
         }
 
-        $colocation->members()->updateExistingPivot(auth()->id(), [
+        $reputationService->handleLeave($colocation, $user);
+
+        $colocation->members()->updateExistingPivot($user->id, [
             'left_at' => now(),
         ]);
 
-        return redirect()->route('dashboard')->with('success', 'Vous avez quitté la colocation.');
+        return redirect()->route('dashboard')
+            ->with('success', 'Vous avez quitté la colocation.');
     }
 
-    public function removeMember(Colocation $colocation, User $user)
+    public function removeMember(Colocation $colocation, User $member, ReputationService $reputationService) 
     {
+        $this->authorize('update', $colocation);
 
-        // empêcher retirer owner
-        $pivot = $colocation->members()->whereKey($user->id)->firstOrFail()->pivot;
+        $owner = auth()->user();
 
-        if ($pivot->role === 'owner') {
-            return back()->withErrors(['remove' => "Impossible de retirer l'owner."]);
-        }
+        $reputationService->handleOwnerRemove(
+            $colocation,
+            $owner,
+            $member
+        );
 
-        // marquer left_at
-        $colocation->members()->updateExistingPivot($user->id, [
+        $colocation->members()->updateExistingPivot($member->id, [
             'left_at' => now(),
         ]);
 
