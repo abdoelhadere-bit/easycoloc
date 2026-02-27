@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateColocationRequest;
 use App\Models\Colocation;
 use Illuminate\Http\Request;
 use App\Services\BalanceService;
+use Illuminate\Support\Str;
 
 class ColocationController extends Controller
 {
@@ -52,38 +53,61 @@ class ColocationController extends Controller
 
   public function show(Colocation $colocation, BalanceService $balanceService)
     {
-        // Verifier que l utilisateur est membre actif
-        $isMember = $colocation->members()
-            ->whereKey(auth()->id())
-            ->wherePivotNull('left_at')
-            ->exists();
+        
+        $this->authorize('view', $colocation);
 
-        $isActive = $colocation->status;
-        if($isActive === 'cancelled'){
-            // abort(403);
-        }
-        abort_unless($isMember, 403);
+        $month = request('month'); 
 
-        $expenses = $colocation->expenses()
+        $expensesQuery = $colocation->expenses()
             ->with(['category', 'payer'])
-            ->latest('date')
-            ->get();
+            ->latest('date');
+
+        if ($month) {
+            $expensesQuery->where('date', 'like', $month.'-%');
+        }
+
+        $expenses = $expensesQuery->get();
+
+        $availableMonths = $colocation->expenses()
+                                ->pluck('date')
+                                ->map(fn($d) => substr($d, 0, 7)) 
+                                ->unique()
+                                ->sortDesc()
+                                ->values();
 
         $members = $colocation->members()
             ->wherePivotNull('left_at')
             ->get();
 
         $data = $balanceService->calculate($colocation);
-
+        
         $balances = $data['balances'];
+        // dd($data['balances']);
         $transactions = $data['transactions'];
 
+        $total = $colocation->expenses->sum('amount');
+        $count = $members->count();
+        $share = $count > 0 ? $total / $count : 0;
+
+        $categories = $colocation->categories;
+
+        $statsByCategory = $expenses->groupBy('category_id')
+                                ->map(function ($items) {
+                                    return $items->sum('amount');  
+                                });
+
         return view('colocations.show', compact(
+            'categories',
             'colocation',
             'expenses',
             'members',
             'balances',
-            'transactions'
+            'transactions',
+            'total',
+            'share',
+            'statsByCategory',
+            'availableMonths',
+            'month'
         ));
     }
 
@@ -92,7 +116,8 @@ class ColocationController extends Controller
 
     public function update(UpdateColocationRequest $request, Colocation $colocation)
     {
-        // (Plus tard: vérifier owner)
+        $this->authorize('update', $colocation);
+
         $colocation->update([
             'name' => $request->name,
         ]);
@@ -103,7 +128,7 @@ class ColocationController extends Controller
 
     public function cancel(Colocation $colocation)
     {
-        // (Plus tard: vérifier owner)
+        $this->authorize('delete', $colocation);
         $colocation->update(['status' => 'cancelled']);
         return redirect()->route('dashboard')->with('success', 'Colocation annulée.');
     }
@@ -126,5 +151,23 @@ class ColocationController extends Controller
         ]);
 
         return redirect()->route('dashboard')->with('success', 'Vous avez quitté la colocation.');
+    }
+
+    public function removeMember(Colocation $colocation, User $user)
+    {
+
+        // empêcher retirer owner
+        $pivot = $colocation->members()->whereKey($user->id)->firstOrFail()->pivot;
+
+        if ($pivot->role === 'owner') {
+            return back()->withErrors(['remove' => "Impossible de retirer l'owner."]);
+        }
+
+        // marquer left_at
+        $colocation->members()->updateExistingPivot($user->id, [
+            'left_at' => now(),
+        ]);
+
+        return back()->with('success', 'Membre retiré.');
     }
 }

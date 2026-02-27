@@ -45,4 +45,14 @@ class Colocation extends Model
     {
         return $this->hasMany(Payment::class);
     }
+
+
+    public function isOwner($userId)
+    {
+        return $this->members()
+            ->where('users.id', $userId)
+            ->wherePivot('role', 'owner')
+            ->wherePivotNull('left_at')
+            ->exists();
+    }
 }
