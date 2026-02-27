@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Colocation;
 use App\Models\Invitation;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\InvitationMail;
 
 class InvitationController extends Controller
 {
@@ -14,6 +16,33 @@ class InvitationController extends Controller
         
         $token = Str::uuid()->toString();
 
+        // Vérifier colocation active
+        abort_if($colocation->status !== 'active', 403);
+
+        // Vérifier email déjà membre
+        $alreadyMember = $colocation->members()
+            ->where('email', request('email'))
+            ->wherePivotNull('left_at')
+            ->exists();
+
+        if ($alreadyMember) {
+            return back()->withErrors([
+                'email' => 'Cet utilisateur est déjà membre.'
+            ]);
+        }
+
+        // Vérifier invitation déjà pending
+        $alreadyInvited = Invitation::where('colocation_id', $colocation->id)
+            ->where('email', request('email'))
+            ->where('status', 'pending')
+            ->exists();
+
+        if ($alreadyInvited) {
+            return back()->withErrors([
+                'email' => 'Une invitation est déjà en attente.'
+            ]);
+        }
+
         $invitation = Invitation::create([
             'colocation_id' => $colocation->id,
             'email' => request('email'),
@@ -21,8 +50,10 @@ class InvitationController extends Controller
             'status' => 'pending',
         ]);
 
-        // Pour l’instant, on affiche le lien au lieu d’envoyer email
-        return back()->with('invite_link', route('invitations.show', $token));
+        Mail::to($invitation->email)
+         ->send(new InvitationMail($invitation));
+
+        return back()->with('success', 'Invitation envoyée avec succès.');
     }
 
     public function show(string $token)
@@ -31,34 +62,46 @@ class InvitationController extends Controller
         return view('invitations.show', compact('invitation'));
     }
 
-    public function accept(string $token)
-    {
-        $invitation = Invitation::where('token', $token)->firstOrFail();
+   public function accept(string $token)
+{
+    $invitation = Invitation::where('token', $token)->firstOrFail();
 
-        abort_unless(auth()->check(), 403);
-
-        // Vérifier email correspond
-        abort_unless(auth()->user()->email === $invitation->email, 403);
-
-        // Vérifier 1 seule colocation active
-        $hasActive = auth()->user()->colocations()
-            ->wherePivotNull('left_at')
-            ->where('status', 'active')
-            ->exists();
-
-        abort_if($hasActive, 403);
-
-        $colocation = $invitation->colocation;
-
-        // Attacher dans pivot
-        $colocation->members()->syncWithoutDetaching([
-            auth()->id() => ['role' => 'member']
-        ]);
-
-        $invitation->update(['status' => 'accepted']);
-
-        return redirect()->route('colocations.show', $colocation);
+    if (!auth()->check()) {
+        return redirect()->route('login')
+            ->withErrors(['auth' => 'Veuillez vous connecter pour accepter l’invitation.']);
     }
+
+    if (auth()->user()->email !== $invitation->email) {
+        return redirect()->route('dashboard')
+            ->withErrors(['auth' => 'Cette invitation ne vous est pas destinée.']);
+    }
+
+    if ($invitation->expires_at && now()->greaterThan($invitation->expires_at)) {
+        return redirect()->route('dashboard')
+            ->withErrors(['auth' => 'Invitation expirée.']);
+    }
+
+    $hasActive = auth()->user()->colocations()
+        ->wherePivotNull('left_at')
+        ->where('status', 'active')
+        ->exists();
+
+    if ($hasActive) {
+        return redirect()->route('dashboard')
+            ->withErrors(['auth' => 'Vous avez déjà une colocation active.']);
+    }
+
+    $colocation = $invitation->colocation;
+
+    $colocation->members()->syncWithoutDetaching([
+        auth()->id() => ['role' => 'member']
+    ]);
+
+    $invitation->update(['status' => 'accepted']);
+
+    return redirect()->route('colocations.show', $colocation)
+        ->with('success', 'Invitation acceptée.');
+}
 
     public function refuse(string $token)
     {
