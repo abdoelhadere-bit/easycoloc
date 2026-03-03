@@ -28,10 +28,8 @@ class DashboardController extends Controller
             ->latest()
             ->get();
 
-        // Stats “Réputation”
         $reputation = (int) ($user->reputation ?? 0);
 
-        // Dépenses globales du mois en cours (toutes colocations où le user est membre actif)
         $monthStart = Carbon::now()->startOfMonth()->toDateString();
         $monthEnd   = Carbon::now()->endOfMonth()->toDateString();
 
