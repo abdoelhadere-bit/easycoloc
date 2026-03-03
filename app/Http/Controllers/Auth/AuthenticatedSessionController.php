@@ -27,6 +27,14 @@ class AuthenticatedSessionController extends Controller
         $request->authenticate();
 
         $request->session()->regenerate();
+        
+        if (auth()->user()->is_banned) {
+        auth()->logout();
+
+        return back()->withErrors([
+            'email' => 'Votre compte est banni.'
+        ]);
+    }
 
         return redirect()->intended(route('dashboard', absolute: false));
     }
