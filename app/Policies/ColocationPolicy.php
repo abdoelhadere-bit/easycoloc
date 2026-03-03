@@ -14,10 +14,13 @@ class ColocationPolicy
      */
     public function view(User $user, Colocation $colocation): bool
     {
+        if ($user->role === 'admin_global') return true;
+        
         return $colocation->members()
                         ->where('users.id', $user->id)
                         ->wherePivotNull('left_at')
-                        ->exists();
+                        ->exists() 
+                        && $colocation->status === 'active';
     }
     
     
@@ -27,7 +30,7 @@ class ColocationPolicy
      */
     public function update(User $user, Colocation $colocation): bool
     {
-        return $colocation->owner_id === $user->id;;
+        return $colocation->owner_id === $user->id;
     }
 
     /**
@@ -35,7 +38,13 @@ class ColocationPolicy
      */
     public function delete(User $user, Colocation $colocation): bool
     {
-        return $colocation->owner_id === $user->id;;
+        return $colocation->owner_id === $user->id;
+    }
+
+
+    public function manage(User $user, Colocation $colocation): bool
+    {
+        return $colocation->owner_id === $user->id;
     }
 
     /**
