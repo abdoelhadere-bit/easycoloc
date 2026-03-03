@@ -22,6 +22,9 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
+        'is_banned',
+        'reputation'
     ];
 
     /**
@@ -44,6 +47,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_banned' => 'boolean',
+            'reputation' => 'integer'
         ];
     }
 
@@ -57,4 +62,6 @@ class User extends Authenticatable
     {
         return $this->hasMany(Colocation::class, 'owner_id');
     }
+
+ 
 }
