@@ -24,6 +24,7 @@ Route::middleware(['auth', 'banned'])->group(function () {
 
     // Colocations
     Route::get('/colocations/create', [ColocationController::class, 'create'])->name('colocations.create');
+    Route::get('/colocations', [ColocationController::class, 'index'])->name('colocations.index');
     Route::post('/colocations', [ColocationController::class, 'store'])->name('colocations.store');
     Route::get('/colocations/{colocation}', [ColocationController::class, 'show'])->name('colocations.show');
     Route::post('/colocations/{colocation}/leave', [ColocationController::class, 'leave'])->name('colocations.leave');
@@ -39,7 +40,7 @@ Route::middleware(['auth', 'banned'])->group(function () {
         Route::patch('/colocations/{colocation}/categories/{category}', [CategoryController::class, 'update'])->name('categories.update');
         Route::delete('/colocations/{colocation}/categories/{category}', [CategoryController::class, 'destroy'])->name('categories.destroy');
 
-        Route::post('/colocations/{colocation}/members/{user}/remove', [ColocationController::class, 'removeMember'])
+        Route::post('/colocations/{colocation}/members/{member}/remove', [ColocationController::class, 'removeMember'])
             ->name('colocations.members.remove');
     });
 
@@ -61,6 +62,15 @@ Route::middleware(['auth', 'banned'])->group(function () {
         Route::post('/admin/users/{user}/ban', [AdminController::class, 'ban'])->name('admin.users.ban');
         Route::post('/admin/users/{user}/unban', [AdminController::class, 'unban'])->name('admin.users.unban');
     });
+
+    Route::get('/test-mail', function () {
+    Mail::raw('Test email EasyColoc', function ($message) {
+        $message->to('abdoelhadere3@gmail.com')
+                ->subject('Test Gmail SMTP');
+    });
+
+    return 'Mail envoyé';
+});
 });
 
 require __DIR__.'/auth.php';
