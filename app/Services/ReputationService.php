@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\Colocation;
+use App\Services\BalanceService;
+use App\Models\Payment;
 
 class ReputationService
 {
@@ -13,19 +15,13 @@ class ReputationService
     {
         $this->balanceService = $balanceService;
     }
-
-    public function handleLeave(Colocation $colocation, User $user): void
-    {
-        $balance = $this->getUserBalance($colocation, $user);
-
-        $this->applyReputation($user, $balance);
-    }
-
- 
+    
+    
     public function handleCancel(Colocation $colocation): void
     {
-        $balances = $this->balanceService->calculateBalances($colocation);
-
+        $data = $this->balanceService->calculateBalances($colocation);
+        $balances = $data['balances'];
+        
         foreach ($balances as $b) {
             $member = User::find($b['user_id']);
             if ($member) {
@@ -33,29 +29,51 @@ class ReputationService
             }
         }
     }
+                
+                
+    public function handleLeave(Colocation $colocation, User $user): void
+    {
+        $balance = $this->getUserBalance($colocation, $user->id);
 
+        $this->applyReputation($user, $balance);
+    }
  
-    public function handleOwnerRemove(Colocation $colocation, User $owner, User $member): void {
-
+    public function handleOwnerRemove(Colocation $colocation, User $owner, User $member): void
+    {
         $balance = $this->getUserBalance($colocation, $member);
 
         if ($balance < 0) {
+            $data = $this->balanceService->calculateBalances($colocation);
 
-            // Imputer dette au owner (ajustement interne)
-            $colocation->expenses()->create([
-                'user_id' => $owner->id,
-                'title' => 'Dette absorbée - membre retiré',
-                'amount' => abs($balance),
-                'date' => now(),
-                'category_id' => null
-            ]);
+            foreach ($data['transactions'] as $t) {
+                if ($t['from_user_id'] === $member->id) {
+
+                    if ($t['to_user_id'] === $owner->id) {
+
+                        Payment::create([
+                            'colocation_id' => $colocation->id,
+                            'from_user_id'  => $member->id,
+                            'to_user_id'    => $owner->id,
+                            'amount'        => $t['amount'],
+                        ]);
+
+                    } else {
+                        Payment::create([
+                            'colocation_id' => $colocation->id,
+                            'from_user_id'  => $owner->id,  
+                            'to_user_id'    => $t['to_user_id'],
+                            'amount'        => $t['amount'],
+                        ]); 
+                    }
+                    $colocation->expenses()
+                                ->where('user_id', $member->id)
+                                ->update(['user_id' => $owner->id]);
+                }
+            }
         }
-
     }
-
-    /**
-     * Appliquer règle -1 / +1
-     */
+   
+    
     protected function applyReputation(User $user, float $balance): void
     {
         if ($balance < 0) {
@@ -65,12 +83,13 @@ class ReputationService
         }
     }
 
-    protected function getUserBalance(Colocation $colocation, User $user): float
+    protected function getUserBalance(Colocation $colocation, int $userId): float
     {
-        $balances = $this->balanceService->calculateBalances($colocation);
+        $data = $this->balanceService->calculateBalances($colocation);
+        $balances = $data['balances'];
 
         $userData = collect($balances)
-            ->firstWhere('user_id', $user->id);
+            ->firstWhere('user_id', $userId);
 
         return $userData['balance'] ?? 0;
     }

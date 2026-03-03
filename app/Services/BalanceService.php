@@ -3,91 +3,160 @@
 namespace App\Services;
 
 use App\Models\Colocation;
+use Carbon\Carbon;
 
 class BalanceService
 {
-    public function calculate(Colocation $colocation)
+    public function calculateBalances(Colocation $colocation): array
     {
-        $members = $colocation->members()
-            ->wherePivotNull('left_at')
+        $membersAll = $colocation->members()
+            ->withPivot(['joined_at', 'left_at'])
+            ->withTimestamps()
             ->get();
 
-        $expenses = $colocation->expenses;
-        $payments = $colocation->payments;
-
-        $total = $expenses->sum('amount');
-        $count = $members->count();
-
-        if ($count == 0) {
+        if ($membersAll->isEmpty()) {
             return ['balances' => [], 'transactions' => []];
         }
 
-        $share = $total / $count;
+        $membersActive = $membersAll->filter(fn ($m) => is_null($m->pivot->left_at));
 
-        $balances = [];
+        $expenses = $colocation->expenses()->orderBy('date')->orderBy('id')->get();
+        $payments = $colocation->payments()->orderBy('paid_at')->orderBy('id')->get();
 
-        // Calcul balances depuis dépenses
-        foreach ($members as $member) {
+        $balancesCents = array_fill_keys($membersAll->pluck('id')->all(), 0);
 
-            $paid = $expenses
-                ->where('user_id', $member->id)
-                ->sum('amount');
+        foreach ($expenses as $e) {
+            $day = Carbon::parse($e->date)->toDateString();
 
-            $balances[] = [
-                'id' => $member->id,
-                'name' => $member->name,
-                'balance' => round($paid - $share, 2),
-            ];
-        }
-        // Appliquer paiements
-        foreach ($payments as $payment) {
-            foreach ($balances as $key => $b) {
-                if ($b['id'] == $payment->from_user_id) {
-                    $balances[$key]['balance'] += $payment->amount;
-                }
-                if ($b['id'] == $payment->to_user_id) {
-                    $balances[$key]['balance'] -= $payment->amount;
-                }
+            $participants = $membersAll
+                ->filter(fn ($m) => $this->activeOnDay($m, $day))
+                ->values();
+
+            $count = $participants->count();
+            if ($count === 0) continue;
+
+            $amount = $this->toCents($e->amount);
+
+            $share = intdiv($amount, $count);
+            $remainder = $amount - ($share * $count);
+
+            // payeur : + montant total
+            if (isset($balancesCents[$e->user_id])) {
+                $balancesCents[$e->user_id] += $amount;
+            }
+
+            // participants : - part
+            foreach ($participants as $i => $p) {
+                $owed = $share + ($i < $remainder ? 1 : 0);
+                $balancesCents[$p->id] -= $owed;
             }
         }
-        
-        // Séparer
+
+        // Paiements : from + amount ; to - amount
+        foreach ($payments as $p) {
+            $amount = $this->toCents($p->amount);
+
+            if (isset($balancesCents[$p->from_user_id])) $balancesCents[$p->from_user_id] += $amount;
+            if (isset($balancesCents[$p->to_user_id]))   $balancesCents[$p->to_user_id]   -= $amount;
+        }
+
+        $displayBalances = $membersActive->map(function ($m) use ($balancesCents) {
+            return [
+                'user_id' => $m->id,
+                'name' => $m->name,
+                'balance' => $this->fromCents($balancesCents[$m->id] ?? 0),
+            ];
+        })->values()->all();
+
+        $transactions = $this->buildTransactions($displayBalances);
+
+        return [
+            'balances' => $displayBalances,
+            'transactions' => $transactions,
+        ];
+    }
+
+    private function buildTransactions(array $displayBalances): array
+    {
         $creditors = [];
         $debtors = [];
 
-        foreach ($balances as $b) {
-            // dd($balances);
-            if ($b['balance'] > 0) $creditors[] = $b;
-            if ($b['balance'] < 0) $debtors[] = $b;
-            }
-            
-            //  Générer transactions
-            $transactions = [];
+        foreach ($displayBalances as $b) {
+            $c = $this->toCents($b['balance']);
+            if ($c > 0) $creditors[] = ['cents' => $c] + $b;
+            if ($c < 0) $debtors[] = ['cents' => $c] + $b;
+        }
+
+        $transactions = [];
 
         foreach ($debtors as &$debtor) {
             foreach ($creditors as &$creditor) {
+                if ($debtor['cents'] === 0) break;
+                if ($creditor['cents'] === 0) continue;
 
-                if ($debtor['balance'] == 0) break;
-                if ($creditor['balance'] == 0) continue;
-
-                $amount = min(abs($debtor['balance']), $creditor['balance']);
+                $amount = min(abs($debtor['cents']), $creditor['cents']);
 
                 $transactions[] = [
-                    'from_user_id' => $debtor['id'],
-                    'to_user_id' => $creditor['id'],
+                    'from_user_id' => $debtor['user_id'],
+                    'to_user_id' => $creditor['user_id'],
                     'from' => $debtor['name'],
                     'to' => $creditor['name'],
-                    'amount' => round($amount, 2),
-                    ];
-                    
-                    $debtor['balance'] += $amount;
-                    $creditor['balance'] -= $amount;
-                    }
-                    }
-                    
-        return [
-            'balances' => $balances,
-            'transactions' => $transactions
-        ];
+                    'amount' => $this->fromCents($amount),
+                ];
+
+                $debtor['cents'] += $amount;
+                $creditor['cents'] -= $amount;
+            }
+        }
+
+        return $transactions;
+    }
+
+    // Inclut le jour du départ
+    private function activeOnDay($member, string $day): bool
+    {
+        $joined = Carbon::parse($member->pivot->joined_at);
+
+        $left = $member->pivot->left_at ? Carbon::parse($member->pivot->left_at) : null;
+
+        $joinedDay = $joined->toDateString();
+        $leftDay = $left ? $left->toDateString() : null;
+
+        return $joinedDay <= $day && (!$leftDay || $leftDay >= $day);
+    }
+
+    private function toCents($amount): int
+    {
+        $s = str_replace(',', '.', (string) $amount);
+        $neg = false;
+
+        if (str_starts_with($s, '-')) {
+            $neg = true;
+            $s = substr($s, 1);
+        }
+
+        if (!str_contains($s, '.')) {
+            $c = ((int) $s) * 100;
+            return $neg ? -$c : $c;
+        }
+
+        [$i, $d] = explode('.', $s, 2);
+        $d = substr($d . '00', 0, 2);
+
+        $c = ((int) $i) * 100 + (int) $d;
+        return $neg ? -$c : $c;
+    }
+
+    private function fromCents(int $cents): float
+    {
+        return round($cents / 100, 2);
+    }
+
+    public function getUserBalance(Colocation $colocation, int $userId): float
+    {
+        $data = $this->calculateBalances($colocation);
+        $row = collect($data['balances'])->firstWhere('user_id', $userId);
+
+        return $row ? (float) $row['balance'] : 0.0;
     }
 }
