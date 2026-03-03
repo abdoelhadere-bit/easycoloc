@@ -19,6 +19,10 @@ class ExpenseController extends Controller
             ->exists();
 
         abort_unless($isMember, 403);
+        
+        if ($colocation->categories()->count() === 0) {
+            return back()->withErrors(['category_id' => 'Vous devez créer au moins une catégorie pour cette colocation avant d\'ajouter une dépense.']);
+        }
 
         Expense::create([
             'title' => $request->title,
