@@ -16,10 +16,8 @@ class InvitationController extends Controller
         
         $token = Str::uuid()->toString();
 
-        // Vérifier colocation active
         abort_if($colocation->status !== 'active', 403);
 
-        // Vérifier email déjà membre
         $alreadyMember = $colocation->members()
             ->where('email', request('email'))
             ->wherePivotNull('left_at')
@@ -31,7 +29,6 @@ class InvitationController extends Controller
             ]);
         }
 
-        // Vérifier invitation déjà pending
         $alreadyInvited = Invitation::where('colocation_id', $colocation->id)
             ->where('email', request('email'))
             ->where('status', 'pending')
@@ -53,7 +50,7 @@ class InvitationController extends Controller
         Mail::to($invitation->email)
          ->send(new InvitationMail($invitation));
 
-        return back()->with('success', 'Invitation envoyée avec succès.');
+        return back()->with('success', 'Invitation envoyée avec succès. Token: '.$token); 
     }
 
     public function show(string $token)
@@ -94,7 +91,11 @@ class InvitationController extends Controller
     $colocation = $invitation->colocation;
 
     $colocation->members()->syncWithoutDetaching([
-        auth()->id() => ['role' => 'member']
+        auth()->id() => [
+            'role' => 'member',
+            'left_at' => null,
+            'joined_at' => now(),
+        ]
     ]);
 
     $invitation->update(['status' => 'accepted']);
